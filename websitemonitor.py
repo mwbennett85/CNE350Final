@@ -6,6 +6,50 @@
 import os
 import sys
 import requests
+from bs4 import BeautifulSoup
+import smtplib
+
+from config import SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL
+SMTP_HOST='smtp.gmail.com'
+SMTP_PORT='465'
+SMTP_SSL=True
+
+SMTP_TO_EMAIL='cne350throwaway@hotmail.com'
+
+def email_notification(subject, message):
+    if (SMTP_SSL):
+        smtp_server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT)
+    else:
+        smtp_server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+
+    smtp_server.ehlo()
+    smtp_server.login(SMTP_USER, SMTP_PASSWORD)
+
+    email_text = \
+"""From: %s
+To: %s
+Subject: %s
+
+%s
+""" % (SMTP_FROM_EMAIL, SMTP_TO_EMAIL, subject, message)
+
+    smtp_server.sendmail(SMTP_FROM_EMAIL, SMTP_TO_EMAIL, email_text)
+
+    smtp_server.close()
+
+def cleanup_html(html):
+    soup = BeautifulSoup(html, features="lxml")
+
+    for s in soup.select('script'):
+        s.extract()
+
+    for s in soup.select('style'):
+        s.extract()
+
+    for s in soup.select('meta'):
+        s.extract()
+
+    return str(soup)
 
 def has_website_changed(website_url, website_name):
     headers = {
@@ -15,42 +59,38 @@ def has_website_changed(website_url, website_name):
 
     response = requests.get(website_url, headers=headers)
 
-    if (response.status_code < 200 or response.status_code > 299):
+    if not response.ok:
         return -1
 
-    response_text = response.text
+    response_text = cleanup_html(response.text)
 
     cache_filename = website_name + "_cache.txt"
 
     if not os.path.exists(cache_filename):
-        file_handle = open(cache_filename, "w")
-        file_handle.write(response_text)
-        file_handle.close()
+        with open(cache_filename, "w", encoding="utf-8") as file_handle:
+            file_handle.write(response_text)
         return 0
 
-    file_handle = open(cache_filename, "r+")
-    previous_response_text = file_handle.read()
-    file_handle.seek(0)
+    with open(cache_filename, "r+", encoding="utf-8") as file_handle:
+        previous_response_text = file_handle.read()
+        file_handle.seek(0)
 
-    if response_text == previous_response_text:
-        file_handle.close()
-
-        return 0
-    else:
-        file_handle.truncate()
-        file_handle.write(response_text)
-        file_handle.close()
-
-        return 1
+        if response_text == previous_response_text:
+            return 0
+        else:
+            file_handle.truncate()
+            file_handle.write(response_text)
+            return 1
 
 def main():
-    website_status = has_website_changed(sys.argv[1], sys.argv[2])
+    website_status = has_website_changed("https://google.com", "CNE Program")
 
     if website_status == -1:
         print("Non 2XX response while fetching")
     elif website_status == 0:
         print("Website is the same")
     elif website_status == 1:
+        email_notification("A Change has Occurred",  "CNE Program has changed.")
         print("Website has changed")
 
 if __name__ == "__main__":
